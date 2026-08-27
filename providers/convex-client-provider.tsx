@@ -4,9 +4,10 @@ import { type ReactNode } from "react";
 import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react";
 import { ConvexReactClient } from "convex/react";
 import { authClient } from "@/lib/auth-client";
+import { getPublicConvexUrl } from "@/lib/env";
 
 const convex = new ConvexReactClient(
-  process.env.NEXT_PUBLIC_CONVEX_URL || "http://127.0.0.1:3210",
+  getPublicConvexUrl() || "http://127.0.0.1:3210",
 );
 
 export function ConvexClientProvider({

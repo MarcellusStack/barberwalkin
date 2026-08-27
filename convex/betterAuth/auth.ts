@@ -21,10 +21,13 @@ export const authComponent = createClient<DataModel, typeof schema>(
 export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   return {
     appName: "BarberWalkin",
-    baseURL: process.env.SITE_URL || "http://localhost:3000",
+    baseURL:
+      process.env.SITE_URL ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "http://localhost:3000",
     secret:
       process.env.BETTER_AUTH_SECRET ||
-      "development-secret-barberwalkin-must-be-32-chars",
+      "development-secret-barberwalkin-32ch",
     database: authComponent.adapter(ctx),
     plugins: [convex({ authConfig })],
   } satisfies BetterAuthOptions;

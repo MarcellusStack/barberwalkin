@@ -142,7 +142,7 @@ test.describe("Better Auth Serverabfragen & Sitzungsstatus", () => {
 });
 
 test.describe("Browser End-to-End Integration mit ConvexBetterAuthProvider", () => {
-  test("rendert Startseite mit aktivem Auth-Client und Convex-Provider", async ({
+  test("rendert Startseite mit aktivem Auth-Client, Convex-Provider und deutschem Statusfeld", async ({
     page,
   }) => {
     await page.goto("/");
@@ -154,6 +154,11 @@ test.describe("Browser End-to-End Integration mit ConvexBetterAuthProvider", () 
       page.getByRole("heading", { level: 1, name: "BarberWalkin" }),
     ).toBeVisible();
     await expect(page.getByText("Walk-in-Betrieb in Echtzeit")).toBeVisible();
+    await expect(
+      page.getByText("Authentifizierung & Backend-Status"),
+    ).toBeVisible();
+    await expect(page.getByText("Sitzungsstatus")).toBeVisible();
+    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
   });
 
   test("Next.js Auth-Route leitet Anfragen korrekt an den Testserver weiter", async ({
