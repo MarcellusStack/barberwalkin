@@ -66,7 +66,7 @@ export function getPublicConvexUrl(): string | null {
 }
 
 /**
- * Liefert die validierte Convex-URL oder wirft einen Fehler mit deutscher Meldung.
+ * Liefert die validierte Convex-URL oder wirft einen Fehler mit deutscher Fehlermeldung.
  */
 export function requirePublicConvexUrl(): string {
   const rawUrl = getPublicConvexUrl();

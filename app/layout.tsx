@@ -7,8 +7,8 @@ import {
 } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "./globals.css";
-import { theme } from "./theme";
-import { ConvexClientProvider } from "./convex-client-provider";
+import { theme } from "@/theme";
+import { ConvexClientProvider } from "@/providers/convex-client-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,7 +26,11 @@ export const metadata: Metadata = {
     "BarberWalkin organisiert Warteschlange und Stühle für Walk-in-Barbershops in Echtzeit.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="de"

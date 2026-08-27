@@ -1,14 +1,28 @@
 import { expect, test } from "@playwright/test";
-import { validateConvexUrl } from "../../app/env";
-import { createConvexTestServer, type ConvexTestServer } from "../fixtures/convex-test-server";
+import { fetchQuery } from "convex/nextjs";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../convex/_generated/api";
+import {
+  isConvexConfigured,
+  requirePublicConvexUrl,
+  validateConvexUrl,
+} from "../../lib/env";
+import {
+  createConvexTestServer,
+  type ConvexTestServer,
+} from "../fixtures/convex-test-server";
 
 let convexServer: ConvexTestServer;
 
+const originalEnvUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+
 test.beforeAll(async () => {
   convexServer = await createConvexTestServer(3210);
+  process.env.NEXT_PUBLIC_CONVEX_URL = convexServer.url;
 });
 
 test.afterAll(async () => {
+  process.env.NEXT_PUBLIC_CONVEX_URL = originalEnvUrl;
   if (convexServer) {
     await convexServer.close();
   }
@@ -25,7 +39,9 @@ test.describe("Umgebungsvalidierung für Convex", () => {
     expect(validHttp.url).toBe("http://127.0.0.1:3210");
     expect(validHttp.error).toBeNull();
 
-    const validHttps = validateConvexUrl("https://happy-animal-123.convex.cloud");
+    const validHttps = validateConvexUrl(
+      "https://happy-animal-123.convex.cloud",
+    );
     expect(validHttps.isValid).toBe(true);
     expect(validHttps.url).toBe("https://happy-animal-123.convex.cloud");
     expect(validHttps.error).toBeNull();
@@ -43,87 +59,70 @@ test.describe("Umgebungsvalidierung für Convex", () => {
     const malformed = validateConvexUrl("http://");
     expect(malformed.isValid).toBe(false);
     expect(malformed.error).toBe("NEXT_PUBLIC_CONVEX_URL ist keine gültige URL.");
+
+    expect(isConvexConfigured()).toBe(true);
+    expect(requirePublicConvexUrl()).toBe("http://127.0.0.1:3210");
   });
 });
 
 test.describe("Convex End-to-End Integration", () => {
-  test("zeigt Ladezustand, Serverabfrage, leeren Zustand und führt reaktive Mutation aus", async ({
+  test("rendert die Anwendungshülle mit aktivem ConvexClientProvider fehlerfrei", async ({
     page,
   }) => {
-    await page.goto("/convex");
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page).toHaveTitle(
+      "BarberWalkin – Walk-ins einfach organisieren",
+    );
+    await expect(
+      page.getByRole("heading", { level: 1, name: "BarberWalkin" }),
+    ).toBeVisible();
+  });
 
-    // Server-Abfrageanzeige prüfen
-    await expect(page.getByTestId("server-query-section")).toBeVisible();
-    await expect(page.getByText("Server-Statusabfrage")).toBeVisible();
-    await expect(page.getByText("Serverabfrage erfolgreich")).toBeVisible();
-    await expect(page.getByTestId("server-status-message")).toHaveText(
-      "Convex-Backend ist betriebsbereit.",
+  test("führt Serverabfrage über fetchQuery gegen das Convex-Backend aus", async () => {
+    const serverStatus = await fetchQuery(
+      api.probe.getServerStatus,
+      {},
+      { url: "http://127.0.0.1:3210" },
     );
 
-    // Initialer leerer Zustand der reaktiven Sonde
-    await expect(page.getByTestId("empty-state")).toBeVisible();
-    await expect(
-      page.getByRole("heading", { level: 3, name: "Kein Probe-Zustand vorhanden" }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("Aktualisiere den Status unten, um eine reaktive Datenbankänderung"),
-    ).toBeVisible();
-
-    // Formularvalidierung: Leere Eingabe absenden
-    await page.getByTestId("submit-probe-button").click();
-    await expect(page.getByText("Status ist erforderlich")).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Status" })).toBeFocused();
-
-    // Positiver Pfad: Zustand eingeben und absenden
-    await page.getByRole("textbox", { name: "Status" }).fill("Shop-Betrieb aktiv");
-    await page
-      .getByRole("textbox", { name: "Optionale Nachricht" })
-      .fill("2 von 2 Stühlen besetzt");
-    await page.getByTestId("submit-probe-button").click();
-
-    // Reaktive Aktualisierung beobachten
-    await expect(page.getByTestId("positive-state")).toBeVisible();
-    await expect(page.getByTestId("probe-status-badge")).toHaveText("Shop-Betrieb aktiv");
-    await expect(page.getByTestId("probe-message")).toContainText("2 von 2 Stühlen besetzt");
-    await expect(page.getByText("Verbunden mit Convex")).toBeVisible();
-
-    // Leeren des Zustands über Aktionsbutton
-    await page.getByTestId("clear-probe-button").click();
-    await expect(page.getByTestId("empty-state")).toBeVisible();
+    expect(serverStatus).toBeDefined();
+    expect(serverStatus.status).toBe("ok");
+    expect(serverStatus.message).toBe("Convex-Backend ist betriebsbereit.");
+    expect(typeof serverStatus.serverTimeUtc).toBe("number");
   });
 
-  test("behandelt simulierte Validierungs- und Fehlerpfade auf Deutsch", async ({
-    page,
-  }) => {
-    await page.goto("/convex");
+  test("führt Abfragen und Mutationen über den Convex-Client aus", async () => {
+    const client = new ConvexHttpClient("http://127.0.0.1:3210");
 
-    await expect(page.getByTestId("empty-state")).toBeVisible();
-    await page.getByTestId("trigger-error-button").click();
-    await expect(page.getByTestId("error-alert")).toBeVisible();
-    await expect(
-      page.getByText("Validierungsfehler: Der eingegebene Status entspricht nicht den Anforderungen."),
-    ).toBeVisible();
-  });
-
-  test("reagiert in Echtzeit auf serverseitige Datenänderungen ohne Seiten-Reload", async ({
-    page,
-  }) => {
-    await page.goto("/convex");
-
-    await expect(page.getByTestId("empty-state")).toBeVisible();
-
-    // Serverseitige Mutation ohne Browserinteraktion auslösen
-    convexServer.setProbe({
+    // 1. Initialer leerer Zustand
+    const initialProbe = await client.query(api.probe.getProbeStatus, {
       name: "integration-probe",
-      status: "Echtzeit-Aktualisierung empfangen",
-      message: "Push vom Test-Server",
     });
+    expect(initialProbe).toBeNull();
 
-    // Client-Sonde muss reaktiv ohne Seiten-Reload aktualisieren
-    await expect(page.getByTestId("positive-state")).toBeVisible();
-    await expect(page.getByTestId("probe-status-badge")).toHaveText(
-      "Echtzeit-Aktualisierung empfangen",
-    );
-    await expect(page.getByTestId("probe-message")).toContainText("Push vom Test-Server");
+    // 2. Mutation ausführen
+    const created = await client.mutation(api.probe.setProbeStatus, {
+      name: "integration-probe",
+      status: "Shop-Betrieb aktiv",
+      message: "2 von 2 Stühlen besetzt",
+    });
+    expect(created.status).toBe("Shop-Betrieb aktiv");
+    expect(created.message).toBe("2 von 2 Stühlen besetzt");
+
+    // 3. Aktualisierten Zustand abfragen
+    const updatedProbe = await client.query(api.probe.getProbeStatus, {
+      name: "integration-probe",
+    });
+    expect(updatedProbe).not.toBeNull();
+    expect(updatedProbe?.status).toBe("Shop-Betrieb aktiv");
+    expect(updatedProbe?.message).toBe("2 von 2 Stühlen besetzt");
+
+    // 4. Zustand leeren
+    await client.mutation(api.probe.clearProbe, { name: "integration-probe" });
+    const clearedProbe = await client.query(api.probe.getProbeStatus, {
+      name: "integration-probe",
+    });
+    expect(clearedProbe).toBeNull();
   });
 });

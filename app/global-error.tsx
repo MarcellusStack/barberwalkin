@@ -7,7 +7,7 @@ import {
 } from "@mantine/core";
 import { Geist } from "next/font/google";
 import { ErrorFallback } from "./error-fallback";
-import { theme } from "./theme";
+import { theme } from "@/theme";
 import "@mantine/core/styles.css";
 import "./globals.css";
 
