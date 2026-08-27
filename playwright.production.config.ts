@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: ["application-shell.spec.ts", "convex-integration.spec.ts"],
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:3200",
     ...devices["Desktop Chrome"],
@@ -11,6 +11,9 @@ export default defineConfig({
     command: "npm run start -- --hostname 127.0.0.1 --port 3200",
     env: {
       NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3210",
+      NEXT_PUBLIC_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+      NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3200",
+      BETTER_AUTH_SECRET: "development-secret-barberwalkin-must-be-32-chars",
     },
     url: "http://127.0.0.1:3200",
     reuseExistingServer: false,

@@ -13,7 +13,9 @@ import type {
   FilterApi,
   FunctionReference,
 } from "convex/server";
+import type * as auth from "../auth.js";
 import type * as probe from "../probe.js";
+import type { ComponentApi as BetterAuthComponentApi } from "@convex-dev/better-auth/_generated/component.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -24,6 +26,7 @@ import type * as probe from "../probe.js";
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
   probe: typeof probe;
 }>;
 export declare const api: FilterApi<
@@ -34,3 +37,7 @@ export declare const internal: FilterApi<
   typeof fullApi,
   FunctionReference<any, "internal">
 >;
+
+export declare const components: {
+  betterAuth: BetterAuthComponentApi<"betterAuth">;
+};

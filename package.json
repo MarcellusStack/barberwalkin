@@ -27,7 +27,7 @@
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "@types/three": "^0.185.4",
-    "better-auth": "^1.7.1",
+    "better-auth": "~1.6.15",
     "convex": "^1.45.0",
     "dayjs": "^1.11.23",
     "embla-carousel": "^8.5.2",

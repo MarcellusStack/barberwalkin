@@ -15,14 +15,17 @@ import {
 let convexServer: ConvexTestServer;
 
 const originalEnvUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const originalSiteUrl = process.env.NEXT_PUBLIC_CONVEX_SITE_URL;
 
 test.beforeAll(async () => {
-  convexServer = await createConvexTestServer(3210);
+  convexServer = await createConvexTestServer(3210, 3211);
   process.env.NEXT_PUBLIC_CONVEX_URL = convexServer.url;
+  process.env.NEXT_PUBLIC_CONVEX_SITE_URL = convexServer.siteUrl;
 });
 
 test.afterAll(async () => {
   process.env.NEXT_PUBLIC_CONVEX_URL = originalEnvUrl;
+  process.env.NEXT_PUBLIC_CONVEX_SITE_URL = originalSiteUrl;
   if (convexServer) {
     await convexServer.close();
   }

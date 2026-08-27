@@ -9,13 +9,39 @@ export interface ProbeRecord {
   updatedAt: number;
 }
 
+export interface AuthUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  isAnonymous?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AuthSessionRecord {
+  id: string;
+  token: string;
+  userId: string;
+  expiresAt: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ConvexTestServer {
   port: number;
+  sitePort: number;
   url: string;
+  siteUrl: string;
   close: () => Promise<void>;
-  setProbe: (record: Partial<ProbeRecord> & { name: string; status: string }) => ProbeRecord;
+  setProbe: (
+    record: Partial<ProbeRecord> & { name: string; status: string },
+  ) => ProbeRecord;
   getProbe: (name: string) => ProbeRecord | null;
   clearProbe: (name: string) => void;
+  setAuthSession: (session: AuthSessionRecord, user: AuthUserRecord) => void;
+  getAuthSession: (token: string) => { session: AuthSessionRecord; user: AuthUserRecord } | null;
+  clearAuthSessions: () => void;
   reset: () => void;
 }
 
@@ -25,8 +51,29 @@ function encodeTs(num: number): string {
   return buf.toString("base64");
 }
 
-export async function createConvexTestServer(preferredPort = 3210): Promise<ConvexTestServer> {
-  const store = new Map<string, ProbeRecord>();
+function extractBearerToken(authHeader?: string): string | null {
+  if (!authHeader) return null;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+function extractCookie(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const parts = cookieHeader.split(";").map((p) => p.trim());
+  for (const part of parts) {
+    if (part.startsWith(`${name}=`)) {
+      return decodeURIComponent(part.substring(name.length + 1));
+    }
+  }
+  return null;
+}
+
+export async function createConvexTestServer(
+  preferredPort = 3210,
+  preferredSitePort = 3211,
+): Promise<ConvexTestServer> {
+  const probeStore = new Map<string, ProbeRecord>();
+  const sessions = new Map<string, { session: AuthSessionRecord; user: AuthUserRecord }>();
   let currentTs = 1;
 
   interface ClientSubscription {
@@ -45,11 +92,16 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
     ws: WebSocket;
     lastVersion: ClientVersion;
     subscriptions: Map<number, ClientSubscription>;
+    token?: string;
   }
 
   const clients = new Set<ConnectedClient>();
 
-  const getQueryValue = (udfPath: string, args: Record<string, unknown> = {}) => {
+  const getQueryValue = (
+    udfPath: string,
+    args: Record<string, unknown> = {},
+    token?: string,
+  ) => {
     if (udfPath === "probe:getServerStatus") {
       return {
         status: "ok",
@@ -59,7 +111,36 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
     }
     if (udfPath === "probe:getProbeStatus") {
       const name = (args.name as string) || "integration-probe";
-      return store.get(name) || null;
+      return probeStore.get(name) || null;
+    }
+    if (udfPath === "auth:getCurrentUser") {
+      if (!token) return null;
+      const found = sessions.get(token);
+      if (!found) return null;
+      return {
+        subject: found.user.id,
+        issuer: "http://127.0.0.1:3211",
+        name: found.user.name,
+        email: found.user.email,
+        emailVerified: found.user.emailVerified,
+        isAnonymous: found.user.isAnonymous ?? false,
+        tokenIdentifier: `http://127.0.0.1:3211|${found.user.id}`,
+      };
+    }
+    if (udfPath === "auth:getAuthUser") {
+      if (!token) return undefined;
+      const found = sessions.get(token);
+      if (!found) return undefined;
+      return {
+        _id: `user_${found.user.id}`,
+        _creationTime: found.user.createdAt,
+        name: found.user.name,
+        email: found.user.email,
+        emailVerified: found.user.emailVerified,
+        isAnonymous: found.user.isAnonymous,
+        createdAt: found.user.createdAt,
+        updatedAt: found.user.updatedAt,
+      };
     }
     return null;
   };
@@ -73,7 +154,7 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
       const modifications = [];
       for (const [queryId, sub] of client.subscriptions.entries()) {
         const argObj = (sub.args?.[0] as Record<string, unknown>) || {};
-        const val = getQueryValue(sub.udfPath, argObj);
+        const val = getQueryValue(sub.udfPath, argObj, client.token);
         modifications.push({
           type: "QueryUpdated",
           queryId,
@@ -111,10 +192,14 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
     }
   };
 
-  const server = http.createServer((req, res) => {
+  // Main Convex Backend Server
+  const mainServer = http.createServer((req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Convex-Client");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Convex-Client",
+    );
 
     if (req.method === "OPTIONS") {
       res.writeHead(200);
@@ -122,7 +207,10 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
       return;
     }
 
-    if (req.method === "POST" && (req.url === "/api/query" || req.url === "/api/query_at_ts")) {
+    if (
+      req.method === "POST" &&
+      (req.url === "/api/query" || req.url === "/api/query_at_ts")
+    ) {
       let body = "";
       req.on("data", (chunk) => {
         body += chunk;
@@ -132,7 +220,11 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
           const parsed = JSON.parse(body);
           const path = parsed.path;
           const args = parsed.args?.[0] || {};
-          const value = getQueryValue(path, args);
+          const token =
+            extractBearerToken(req.headers.authorization) ||
+            parsed.token ||
+            undefined;
+          const value = getQueryValue(path, args, token);
 
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -176,12 +268,12 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
               message: args.message as string | undefined,
               updatedAt: Date.now(),
             };
-            store.set(name, record);
+            probeStore.set(name, record);
             result = record;
             notifyClients();
           } else if (path === "probe:clearProbe") {
             const name = (args.name as string) || "integration-probe";
-            store.delete(name);
+            probeStore.delete(name);
             result = { success: true };
             notifyClients();
           }
@@ -211,7 +303,107 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
     res.end("Not Found");
   });
 
-  const wss = new WebSocketServer({ server });
+  // Site / Better Auth HTTP Server
+  const siteServer = http.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Convex-Client, Cookie",
+    );
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    const parsedUrl = new URL(req.url || "/", "http://127.0.0.1");
+    const path = parsedUrl.pathname;
+
+    // Better Auth JWT Token endpoint for Convex
+    if (path === "/api/auth/convex/token" || path === "/convex/token") {
+      const sessionCookie =
+        extractCookie(req.headers.cookie, "better-auth.session_token") ||
+        extractCookie(req.headers.cookie, "__Secure-better-auth.session_token") ||
+        extractCookie(req.headers.cookie, "convex_jwt") ||
+        extractBearerToken(req.headers.authorization);
+
+      if (sessionCookie && sessions.has(sessionCookie)) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ token: sessionCookie }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ token: null }));
+      }
+      return;
+    }
+
+    // Better Auth Session lookup
+    if (path === "/api/auth/get-session" || path === "/get-session") {
+      const sessionCookie =
+        extractCookie(req.headers.cookie, "better-auth.session_token") ||
+        extractCookie(req.headers.cookie, "__Secure-better-auth.session_token") ||
+        extractBearerToken(req.headers.authorization);
+
+      if (sessionCookie && sessions.has(sessionCookie)) {
+        const found = sessions.get(sessionCookie)!;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            session: found.session,
+            user: found.user,
+          }),
+        );
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(null));
+      }
+      return;
+    }
+
+    // Better Auth JWKS endpoint
+    if (path === "/api/auth/convex/jwks" || path === "/convex/jwks") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          keys: [
+            {
+              kid: "test-key-id",
+              kty: "OKP",
+              alg: "EdDSA",
+              crv: "Ed25519",
+              x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+              use: "sig",
+            },
+          ],
+        }),
+      );
+      return;
+    }
+
+    // OIDC Configuration endpoint
+    if (
+      path === "/api/auth/convex/.well-known/openid-configuration" ||
+      path === "/convex/.well-known/openid-configuration"
+    ) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          issuer: "http://127.0.0.1:3211",
+          jwks_uri: "http://127.0.0.1:3211/api/auth/convex/jwks",
+        }),
+      );
+      return;
+    }
+
+    // Default 200 for health/probes
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+  });
+
+  const wss = new WebSocketServer({ server: mainServer });
 
   wss.on("connection", (ws) => {
     const client: ConnectedClient = {
@@ -261,7 +453,7 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
               });
 
               const argObj = (mod.args?.[0] as Record<string, unknown>) || {};
-              const val = getQueryValue(mod.udfPath, argObj);
+              const val = getQueryValue(mod.udfPath, argObj, client.token);
               modifications.push({
                 type: "QueryUpdated",
                 queryId: mod.queryId,
@@ -312,11 +504,11 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
               message: args.message as string | undefined,
               updatedAt: Date.now(),
             };
-            store.set(name, record);
+            probeStore.set(name, record);
             result = record;
           } else if (udfPath === "probe:clearProbe") {
             const name = (args.name as string) || "integration-probe";
-            store.delete(name);
+            probeStore.delete(name);
             result = { success: true };
           }
 
@@ -333,6 +525,15 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
           );
 
           notifyClients();
+        } else if (msg.type === "Authenticate") {
+          client.token = msg.token || undefined;
+          notifyClients();
+          ws.send(
+            JSON.stringify({
+              type: "AuthResponse",
+              success: true,
+            }),
+          );
         } else if (msg.type === "Ping") {
           ws.send(JSON.stringify({ type: "Ping" }));
         }
@@ -347,29 +548,53 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.listen(preferredPort, "127.0.0.1", () => {
+    mainServer.listen(preferredPort, "127.0.0.1", () => {
       resolve();
     });
-    server.once("error", reject);
+    mainServer.once("error", reject);
   });
 
-  const address = server.address();
-  const actualPort = typeof address === "object" && address ? address.port : preferredPort;
+  await new Promise<void>((resolve, reject) => {
+    siteServer.listen(preferredSitePort, "127.0.0.1", () => {
+      resolve();
+    });
+    siteServer.once("error", reject);
+  });
+
+  const mainAddress = mainServer.address();
+  const actualPort =
+    typeof mainAddress === "object" && mainAddress
+      ? mainAddress.port
+      : preferredPort;
   const url = `http://127.0.0.1:${actualPort}`;
+
+  const siteAddress = siteServer.address();
+  const actualSitePort =
+    typeof siteAddress === "object" && siteAddress
+      ? siteAddress.port
+      : preferredSitePort;
+  const siteUrl = `http://127.0.0.1:${actualSitePort}`;
 
   return {
     port: actualPort,
+    sitePort: actualSitePort,
     url,
+    siteUrl,
     close: async () => {
       for (const client of clients) {
         client.ws.close();
       }
       clients.clear();
-      await new Promise<void>((resolve) => {
-        wss.close(() => {
-          server.close(() => resolve());
-        });
-      });
+      await Promise.all([
+        new Promise<void>((resolve) => {
+          wss.close(() => {
+            mainServer.close(() => resolve());
+          });
+        }),
+        new Promise<void>((resolve) => {
+          siteServer.close(() => resolve());
+        }),
+      ]);
     },
     setProbe: (record) => {
       const full: ProbeRecord = {
@@ -379,19 +604,31 @@ export async function createConvexTestServer(preferredPort = 3210): Promise<Conv
         message: record.message,
         updatedAt: record.updatedAt || Date.now(),
       };
-      store.set(record.name, full);
+      probeStore.set(record.name, full);
       notifyClients();
       return full;
     },
     getProbe: (name: string) => {
-      return store.get(name) || null;
+      return probeStore.get(name) || null;
     },
     clearProbe: (name: string) => {
-      store.delete(name);
+      probeStore.delete(name);
+      notifyClients();
+    },
+    setAuthSession: (session, user) => {
+      sessions.set(session.token, { session, user });
+      notifyClients();
+    },
+    getAuthSession: (token) => {
+      return sessions.get(token) || null;
+    },
+    clearAuthSessions: () => {
+      sessions.clear();
       notifyClients();
     },
     reset: () => {
-      store.clear();
+      probeStore.clear();
+      sessions.clear();
       notifyClients();
     },
   };

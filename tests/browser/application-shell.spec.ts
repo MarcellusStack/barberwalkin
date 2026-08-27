@@ -1,4 +1,22 @@
 import { expect, test } from "@playwright/test";
+import {
+  createConvexTestServer,
+  type ConvexTestServer,
+} from "../fixtures/convex-test-server";
+
+let convexServer: ConvexTestServer;
+
+test.beforeAll(async () => {
+  convexServer = await createConvexTestServer(3210, 3211);
+  process.env.NEXT_PUBLIC_CONVEX_URL = convexServer.url;
+  process.env.NEXT_PUBLIC_CONVEX_SITE_URL = convexServer.siteUrl;
+});
+
+test.afterAll(async () => {
+  if (convexServer) {
+    await convexServer.close();
+  }
+});
 
 test("deutsche Anwendungshülle wird mit Metadaten, Geist und Mantine geladen", async ({
   page,

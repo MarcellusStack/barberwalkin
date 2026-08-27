@@ -9,6 +9,7 @@ import "@mantine/core/styles.css";
 import "./globals.css";
 import { theme } from "@/theme";
 import { ConvexClientProvider } from "@/providers/convex-client-provider";
+import { getToken } from "@/lib/auth-server";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,11 +27,13 @@ export const metadata: Metadata = {
     "BarberWalkin organisiert Warteschlange und Stühle für Walk-in-Barbershops in Echtzeit.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const token = await getToken().catch(() => null);
+
   return (
     <html
       lang="de"
@@ -42,7 +45,9 @@ export default function RootLayout({
       </head>
       <body className={geistSans.className}>
         <MantineProvider forceColorScheme="light" theme={theme}>
-          <ConvexClientProvider>{children}</ConvexClientProvider>
+          <ConvexClientProvider initialToken={token}>
+            {children}
+          </ConvexClientProvider>
         </MantineProvider>
       </body>
     </html>
