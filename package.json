@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:browser:production": "next build && playwright test --config=playwright.production.config.ts"
   },
   "dependencies": {
     "@convex-dev/better-auth": "^0.12.5",

@@ -4,7 +4,7 @@ export default function Home() {
   return (
     <Container component="main" size="sm" py={{ base: 80, sm: 120 }}>
       <Stack gap="md">
-        <Text c="teal" fw={700} tt="uppercase">
+        <Text c="dimmed" fw={600} size="sm">
           Walk-in-Betrieb in Echtzeit
         </Text>
         <Title order={1}>BarberWalkin</Title>

@@ -4,8 +4,15 @@ html {
 
 body {
   min-height: 100%;
+  color: var(--mantine-color-black);
+  background: var(--mantine-color-white);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:focus-visible {
+  outline: 2px solid var(--mantine-color-black);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
