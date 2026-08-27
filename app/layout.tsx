@@ -8,6 +8,7 @@ import {
 import "@mantine/core/styles.css";
 import "./globals.css";
 import { theme } from "./theme";
+import { ConvexClientProvider } from "./convex-client-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,7 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className={geistSans.className}>
         <MantineProvider forceColorScheme="light" theme={theme}>
-          {children}
+          <ConvexClientProvider>{children}</ConvexClientProvider>
         </MantineProvider>
       </body>
     </html>
