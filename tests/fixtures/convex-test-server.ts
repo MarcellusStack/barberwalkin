@@ -42,6 +42,7 @@ export interface ConvexTestServer {
   setAuthSession: (session: AuthSessionRecord, user: AuthUserRecord) => void;
   getAuthSession: (token: string) => { session: AuthSessionRecord; user: AuthUserRecord } | null;
   clearAuthSessions: () => void;
+  setSimulateAuthError: (simulate: boolean) => void;
   reset: () => void;
 }
 
@@ -62,7 +63,12 @@ function extractCookie(cookieHeader: string | undefined, name: string): string |
   const parts = cookieHeader.split(";").map((p) => p.trim());
   for (const part of parts) {
     if (part.startsWith(`${name}=`)) {
-      return decodeURIComponent(part.substring(name.length + 1));
+      let raw = decodeURIComponent(part.substring(name.length + 1));
+      if (raw.startsWith("s:")) {
+        raw = raw.substring(2);
+      }
+      const token = raw.split(".")[0];
+      return token || raw;
     }
   }
   return null;
@@ -74,6 +80,7 @@ export async function createConvexTestServer(
 ): Promise<ConvexTestServer> {
   const probeStore = new Map<string, ProbeRecord>();
   const sessions = new Map<string, { session: AuthSessionRecord; user: AuthUserRecord }>();
+  let simulateAuthError = false;
   let currentTs = 1;
 
   interface ClientSubscription {
@@ -322,6 +329,100 @@ export async function createConvexTestServer(
     const parsedUrl = new URL(req.url || "/", "http://127.0.0.1");
     const path = parsedUrl.pathname;
 
+    // Better Auth Anonymous Sign-In
+    if (
+      (path === "/api/auth/sign-in/anonymous" ||
+        path === "/sign-in/anonymous") &&
+      req.method === "POST"
+    ) {
+      if (simulateAuthError) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            message: "Anonyme Anmeldung fehlgeschlagen.",
+            code: "FAILED_TO_CREATE_USER",
+          }),
+        );
+        return;
+      }
+
+      const now = Date.now();
+      const userId = `anon_${now}_${Math.random().toString(36).substring(2, 7)}`;
+      const token = `session_${now}_${Math.random().toString(36).substring(2, 9)}`;
+      const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
+
+      const user: AuthUserRecord = {
+        id: userId,
+        name: "Anonymer Benutzer",
+        email: `${userId}@anonymous.placeholder.invalid`,
+        emailVerified: false,
+        isAnonymous: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const session: AuthSessionRecord = {
+        id: `sess_${now}`,
+        token,
+        userId,
+        expiresAt,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      sessions.set(token, { session, user });
+      notifyClients();
+
+      res.setHeader(
+        "Set-Cookie",
+        `better-auth.session_token=${token}; Path=/; HttpOnly; SameSite=Lax`,
+      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          token,
+          user,
+          session,
+        }),
+      );
+      return;
+    }
+
+    // Better Auth Sign Out
+    if (
+      (path === "/api/auth/sign-out" || path === "/sign-out") &&
+      req.method === "POST"
+    ) {
+      if (simulateAuthError) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            message: "Abmeldung fehlgeschlagen.",
+            code: "SIGN_OUT_FAILED",
+          }),
+        );
+        return;
+      }
+
+      const sessionCookie =
+        extractCookie(req.headers.cookie, "better-auth.session_token") ||
+        extractCookie(req.headers.cookie, "__Secure-better-auth.session_token") ||
+        extractBearerToken(req.headers.authorization);
+
+      if (sessionCookie) {
+        sessions.delete(sessionCookie);
+      }
+      notifyClients();
+
+      res.setHeader(
+        "Set-Cookie",
+        `better-auth.session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`,
+      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
     // Better Auth JWT Token endpoint for Convex
     if (path === "/api/auth/convex/token" || path === "/convex/token") {
       const sessionCookie =
@@ -526,12 +627,53 @@ export async function createConvexTestServer(
 
           notifyClients();
         } else if (msg.type === "Authenticate") {
-          client.token = msg.token || undefined;
-          notifyClients();
+          const token =
+            msg.tokenType === "None"
+              ? undefined
+              : msg.value || msg.token || undefined;
+          client.token = token;
+
+          const baseVersion =
+            typeof msg.baseVersion === "number"
+              ? msg.baseVersion
+              : client.lastVersion.identity;
+          const endIdentity = baseVersion + 1;
+          currentTs += 1;
+
+          const startVersion = { ...client.lastVersion };
+          const endVersion: ClientVersion = {
+            querySet: client.lastVersion.querySet,
+            ts: currentTs,
+            identity: endIdentity,
+          };
+          client.lastVersion = endVersion;
+
+          const modifications = [];
+          for (const [queryId, sub] of client.subscriptions.entries()) {
+            const argObj = (sub.args?.[0] as Record<string, unknown>) || {};
+            const val = getQueryValue(sub.udfPath, argObj, client.token);
+            modifications.push({
+              type: "QueryUpdated",
+              queryId,
+              value: val,
+              logLines: [],
+            });
+          }
+
           ws.send(
             JSON.stringify({
-              type: "AuthResponse",
-              success: true,
+              type: "Transition",
+              startVersion: {
+                querySet: startVersion.querySet,
+                ts: encodeTs(startVersion.ts),
+                identity: baseVersion,
+              },
+              endVersion: {
+                querySet: endVersion.querySet,
+                ts: encodeTs(endVersion.ts),
+                identity: endIdentity,
+              },
+              modifications,
             }),
           );
         } else if (msg.type === "Ping") {
@@ -626,9 +768,13 @@ export async function createConvexTestServer(
       sessions.clear();
       notifyClients();
     },
+    setSimulateAuthError: (simulate: boolean) => {
+      simulateAuthError = simulate;
+    },
     reset: () => {
       probeStore.clear();
       sessions.clear();
+      simulateAuthError = false;
       notifyClients();
     },
   };

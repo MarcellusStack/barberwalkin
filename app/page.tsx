@@ -1,10 +1,7 @@
 import { Container, Stack, Text, Title } from "@mantine/core";
-import { isAuthenticated } from "@/lib/auth-server";
 import { AuthProbe } from "@/components/auth-probe";
 
-export default async function Home() {
-  const hasServerSession = await isAuthenticated().catch(() => false);
-
+export default function Home() {
   return (
     <Container component="main" size="sm" py={{ base: 80, sm: 120 }}>
       <Stack gap="lg">
@@ -18,7 +15,7 @@ export default async function Home() {
           </Text>
         </Stack>
 
-        <AuthProbe hasServerSession={hasServerSession} />
+        <AuthProbe />
       </Stack>
     </Container>
   );

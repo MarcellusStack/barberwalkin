@@ -3,6 +3,7 @@ import { convex } from "@convex-dev/better-auth/plugins";
 import type { GenericCtx } from "@convex-dev/better-auth/utils";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
+import { anonymous } from "better-auth/plugins";
 import { components } from "../_generated/api";
 import type { DataModel } from "../_generated/dataModel";
 import authConfig from "../auth.config";
@@ -25,11 +26,9 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       process.env.SITE_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       "http://localhost:3000",
-    secret:
-      process.env.BETTER_AUTH_SECRET ||
-      "development-secret-barberwalkin-32ch",
+    secret: process.env.BETTER_AUTH_SECRET,
     database: authComponent.adapter(ctx),
-    plugins: [convex({ authConfig })],
+    plugins: [convex({ authConfig }), anonymous()],
   } satisfies BetterAuthOptions;
 };
 
