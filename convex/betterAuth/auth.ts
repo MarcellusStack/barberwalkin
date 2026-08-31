@@ -3,7 +3,8 @@ import { convex } from "@convex-dev/better-auth/plugins";
 import type { GenericCtx } from "@convex-dev/better-auth/utils";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
-import { anonymous } from "better-auth/plugins";
+import { anonymous, emailOTP } from "better-auth/plugins";
+import { deliverEmailOtp } from "./emailDelivery";
 import { components } from "../_generated/api";
 import type { DataModel } from "../_generated/dataModel";
 import authConfig from "../auth.config";
@@ -26,9 +27,28 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       process.env.SITE_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       "http://localhost:3000",
+    trustedOrigins: [
+      "http://127.0.0.1:3100",
+      "http://127.0.0.1:3200",
+      "http://127.0.0.1:3000",
+      "http://localhost:3000",
+      "http://localhost:3100",
+      "http://localhost:3200",
+    ],
     secret: process.env.BETTER_AUTH_SECRET,
     database: authComponent.adapter(ctx),
-    plugins: [convex({ authConfig }), anonymous()],
+    plugins: [
+      convex({ authConfig }),
+      anonymous(),
+      emailOTP({
+        async sendVerificationOTP({ email, otp, type }) {
+          await deliverEmailOtp({ email, otp, type });
+        },
+        expiresIn: 300,
+        allowedAttempts: 3,
+        resendStrategy: "rotate",
+      }),
+    ],
   } satisfies BetterAuthOptions;
 };
 

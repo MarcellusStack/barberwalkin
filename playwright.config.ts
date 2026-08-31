@@ -16,6 +16,6 @@ export default defineConfig({
       BETTER_AUTH_SECRET: "development-secret-barberwalkin-must-be-32-chars",
     },
     url: "http://127.0.0.1:3100",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
   },
 });

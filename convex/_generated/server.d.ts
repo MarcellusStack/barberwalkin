@@ -22,6 +22,17 @@ import {
 import type { DataModel } from "./dataModel.js";
 
 /**
+ * Typesafe environment variables.
+ *
+ * This includes platform-provided env vars and any variables declared in
+ * `convex.config.ts`.
+ */
+type Env = {
+  readonly CONVEX_CLOUD_URL: string;
+  readonly CONVEX_SITE_URL: string;
+};
+
+/**
  * Define a query in this Convex app's public API.
  *
  * This function will be allowed to read your Convex database and will be accessible from the client.
@@ -78,7 +89,7 @@ export declare const action: ActionBuilder<DataModel, "public">;
  * Define an action that is only accessible from other Convex functions (but not from the client).
  *
  * @param func - The function. It receives an {@link ActionCtx} as its first argument.
- * @returns The wrapped action. Include this as an `export` to name it and make it accessible.
+ * @returns The wrapped function. Include this as an `export` to name it and make it accessible.
  */
 export declare const internalAction: ActionBuilder<DataModel, "internal">;
 
@@ -95,7 +106,13 @@ export declare const internalAction: ActionBuilder<DataModel, "internal">;
  */
 export declare const httpAction: HttpActionBuilder;
 
-export declare const env: Record<string, string | undefined>;
+/**
+ * Typesafe environment variables.
+ *
+ * This includes platform-provided env vars and any variables declared in
+ * `convex.config.ts`.
+ */
+export declare const env: Env;
 
 /**
  * A set of services for use within Convex query functions.

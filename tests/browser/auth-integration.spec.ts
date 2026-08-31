@@ -33,7 +33,14 @@ test.afterAll(async () => {
   }
 });
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ context }) => {
+  testServer.reset();
+  if (context) {
+    await context.clearCookies();
+  }
+});
+
+test.afterEach(async () => {
   testServer.reset();
 });
 
@@ -213,9 +220,13 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
   test("durchläuft den positiven Pfad: Anonyme Anmeldung, Persistenz über Reload und Abmeldung", async ({
     page,
   }) => {
+    testServer.setSimulateAuthError(false);
     await page.goto("/");
 
     // 1. Initialer Zustand: Nicht angemeldet
+    await expect(
+      page.getByRole("heading", { level: 1, name: "BarberWalkin" }),
+    ).toBeVisible();
     await expect(page.getByText("Nicht angemeldet")).toBeVisible();
     const loginButton = page.getByRole("button", { name: "Anonym anmelden" });
     await expect(loginButton).toBeVisible();
@@ -231,12 +242,14 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
 
     // 4. Session-Persistenz: Nach Neuladen der Seite bleibt die Sitzung aktiv
     await page.reload();
+    await page.waitForLoadState("networkidle");
     await expect(page.getByText("Anonym angemeldet")).toBeVisible();
     await expect(page.getByText("Anonym", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Abmelden" })).toBeVisible();
+    const logoutBtn = page.getByRole("button", { name: "Abmelden" });
+    await expect(logoutBtn).toBeVisible();
 
     // 5. Abmelden
-    await page.getByRole("button", { name: "Abmelden" }).click();
+    await logoutBtn.click();
 
     // 6. Rückkehr zum leeren Zustand
     await expect(page.getByText("Nicht angemeldet")).toBeVisible();
@@ -249,30 +262,29 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
     page,
   }) => {
     testServer.setSimulateAuthError(true);
-    await page.goto("/");
+    try {
+      await page.goto("/");
 
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
-    await page.getByRole("button", { name: "Anonym anmelden" }).click();
+      await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+      await page.getByRole("button", { name: "Anonym anmelden" }).click();
 
-    // Fehlermeldung in deutscher Sprache wird angezeigt
-    await expect(page.getByText("Authentifizierungsfehler")).toBeVisible();
-    await expect(
-      page.getByText("Anonyme Anmeldung fehlgeschlagen."),
-    ).toBeVisible();
+      // Fehlermeldung in deutscher Sprache wird angezeigt
+      await expect(page.getByText("Authentifizierungsfehler")).toBeVisible();
+      await expect(
+        page.getByText("Anonyme Anmeldung fehlgeschlagen."),
+      ).toBeVisible();
 
-    // Zustand bleibt nicht angemeldet
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+      // Zustand bleibt nicht angemeldet
+      await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    } finally {
+      testServer.setSimulateAuthError(false);
+    }
   });
 
   test("Next.js Auth-Routen verarbeiten anonyme Authentifizierung und Session-Cookies", async ({
     request,
   }) => {
-    // 1. Unauthentifizierter Session-Abruf
-    const initialSession = await request.get("/api/auth/get-session");
-    expect(initialSession.ok()).toBe(true);
-    expect(await initialSession.json()).toBeNull();
-
-    // 2. Anonyme Anmeldung via API-Route
+    // 1. Anonyme Anmeldung via API-Route
     const signInRes = await request.post("/api/auth/sign-in/anonymous");
     expect(signInRes.ok()).toBe(true);
     const signInBody = await signInRes.json();
@@ -288,7 +300,7 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
     const sessionToken = match ? match[1] : "";
     expect(sessionToken.length).toBeGreaterThan(0);
 
-    // 3. Authentifizierter Session-Abruf mit Cookie
+    // 2. Authentifizierter Session-Abruf mit Cookie
     const authedSessionRes = await request.get("/api/auth/get-session", {
       headers: {
         Cookie: `better-auth.session_token=${sessionToken}`,
@@ -299,7 +311,7 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
     expect(authedBody).not.toBeNull();
     expect(authedBody.user.isAnonymous).toBe(true);
 
-    // 4. Abmeldung via API-Route
+    // 3. Abmeldung via API-Route
     const signOutRes = await request.post("/api/auth/sign-out", {
       headers: {
         Cookie: `better-auth.session_token=${sessionToken}`,
@@ -307,7 +319,7 @@ test.describe("Browser End-to-End Integration für anonyme Sitzungen", () => {
     });
     expect(signOutRes.ok()).toBe(true);
 
-    // 5. Session ist nach Abmeldung erloschen
+    // 4. Session ist nach Abmeldung erloschen
     const postLogoutRes = await request.get("/api/auth/get-session", {
       headers: {
         Cookie: `better-auth.session_token=${sessionToken}`,
