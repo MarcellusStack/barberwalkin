@@ -68,11 +68,4 @@ export default defineSchema({
     cancelledAt: v.optional(v.number()),
     gracePeriodEndsAt: v.optional(v.number()),
   }).index("by_adminId", ["adminId"]),
-
-  probes: defineTable({
-    name: v.string(),
-    status: v.string(),
-    message: v.optional(v.string()),
-    updatedAt: v.number(),
-  }).index("by_name", ["name"]),
 });

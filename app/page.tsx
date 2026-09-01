@@ -1,5 +1,4 @@
 import { Container, Stack, Text, Title } from "@mantine/core";
-import { AuthProbe } from "@/components/auth-probe";
 
 export default function Home() {
   return (
@@ -14,8 +13,6 @@ export default function Home() {
             Walk-ins einfach organisieren.
           </Text>
         </Stack>
-
-        <AuthProbe />
       </Stack>
     </Container>
   );

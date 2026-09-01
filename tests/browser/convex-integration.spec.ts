@@ -1,7 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { fetchQuery } from "convex/nextjs";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../convex/_generated/api";
 import {
   isConvexConfigured,
   requirePublicConvexUrl,
@@ -80,52 +77,5 @@ test.describe("Convex End-to-End Integration", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "BarberWalkin" }),
     ).toBeVisible();
-  });
-
-  test("führt Serverabfrage über fetchQuery gegen das Convex-Backend aus", async () => {
-    const serverStatus = await fetchQuery(
-      api.probe.getServerStatus,
-      {},
-      { url: "http://127.0.0.1:3210" },
-    );
-
-    expect(serverStatus).toBeDefined();
-    expect(serverStatus.status).toBe("ok");
-    expect(serverStatus.message).toBe("Convex-Backend ist betriebsbereit.");
-    expect(typeof serverStatus.serverTimeUtc).toBe("number");
-  });
-
-  test("führt Abfragen und Mutationen über den Convex-Client aus", async () => {
-    const client = new ConvexHttpClient("http://127.0.0.1:3210");
-
-    // 1. Initialer leerer Zustand
-    const initialProbe = await client.query(api.probe.getProbeStatus, {
-      name: "integration-probe",
-    });
-    expect(initialProbe).toBeNull();
-
-    // 2. Mutation ausführen
-    const created = await client.mutation(api.probe.setProbeStatus, {
-      name: "integration-probe",
-      status: "Shop-Betrieb aktiv",
-      message: "2 von 2 Stühlen besetzt",
-    });
-    expect(created.status).toBe("Shop-Betrieb aktiv");
-    expect(created.message).toBe("2 von 2 Stühlen besetzt");
-
-    // 3. Aktualisierten Zustand abfragen
-    const updatedProbe = await client.query(api.probe.getProbeStatus, {
-      name: "integration-probe",
-    });
-    expect(updatedProbe).not.toBeNull();
-    expect(updatedProbe?.status).toBe("Shop-Betrieb aktiv");
-    expect(updatedProbe?.message).toBe("2 von 2 Stühlen besetzt");
-
-    // 4. Zustand leeren
-    await client.mutation(api.probe.clearProbe, { name: "integration-probe" });
-    const clearedProbe = await client.query(api.probe.getProbeStatus, {
-      name: "integration-probe",
-    });
-    expect(clearedProbe).toBeNull();
   });
 });

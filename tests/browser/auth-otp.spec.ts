@@ -69,14 +69,15 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     page,
   }) => {
     const testEmail = "barber@berlin-cut.de";
-    await page.goto("/");
+    await page.goto("/sign-in");
 
-    // 1. Initialer Zustand: Unangemeldet
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    // 1. Initialer Zustand: Anmeldung mit leerem Formular, keine Meldungen
     const emailInput = page.getByPlaceholder("name@beispiel.de");
     const sendButton = page.getByRole("button", { name: "Code anfordern" });
     await expect(emailInput).toBeVisible();
     await expect(sendButton).toBeVisible();
+    await expect(page.getByText("Authentifizierungsfehler")).toHaveCount(0);
+    await expect(page.getByText("Erfolgreich angemeldet!")).toHaveCount(0);
 
     // 2. E-Mail eingeben und Code anfordern
     await emailInput.fill(testEmail);
@@ -84,7 +85,9 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
 
     // 3. Erfolgsmeldung und OTP-Eingabefeld werden angezeigt
     await expect(
-      page.getByText("Bestätigungscode wurde an Ihre E-Mail-Adresse gesendet."),
+      page.getByText(
+        "Anfrage verarbeitet. Falls die Zustellung möglich war, erhalten Sie gleich einen Bestätigungscode.",
+      ),
     ).toBeVisible();
     const otpInput = page.getByPlaceholder("123456");
     await expect(otpInput).toBeVisible();
@@ -104,20 +107,20 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     await otpInput.fill(otp);
     await verifyButton.click();
 
-    // 6. Sitzungsstatus wechselt zu 'Angemeldet als barber@berlin-cut.de' mit Badge 'Verifiziert'
+    // 6. Anmeldung zeigt "Angemeldet als" mit E-Mail-Adresse
     await expect(page.getByText(`Angemeldet als ${testEmail}`)).toBeVisible();
-    await expect(page.getByText("Verifiziert", { exact: true })).toBeVisible();
+    await expect(page.getByText("Erfolgreich angemeldet!")).toBeVisible();
     const logoutButton = page.getByRole("button", { name: "Abmelden" });
     await expect(logoutButton).toBeVisible();
 
     // 7. Persistenz nach Neuladen der Seite prüfen
     await page.reload();
     await expect(page.getByText(`Angemeldet als ${testEmail}`)).toBeVisible();
-    await expect(page.getByText("Verifiziert", { exact: true })).toBeVisible();
+    await expect(logoutButton).toBeVisible();
 
     // 8. Abmelden und Rückkehr zum leeren Zustand
     await page.getByRole("button", { name: "Abmelden" }).click();
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    await expect(page.getByText("Angemeldet als")).not.toBeVisible();
     await expect(page.getByPlaceholder("name@beispiel.de")).toBeVisible();
   });
 
@@ -125,7 +128,7 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     page,
   }) => {
     const testEmail = "security@barberwalkin.de";
-    await page.goto("/");
+    await page.goto("/sign-in");
 
     // 1. Code anfordern
     await page.getByPlaceholder("name@beispiel.de").fill(testEmail);
@@ -167,14 +170,14 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     await expect(
       page.getByText("Ungültiger Bestätigungscode. Bitte überprüfen Sie die Eingabe."),
     ).toBeVisible();
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    await expect(page.getByText("Angemeldet als")).not.toBeVisible();
   });
 
   test("weist abgelaufene Bestätigungscodes (Expiry) mit deutscher Fehlermeldung ab", async ({
     page,
   }) => {
     const testEmail = "expired@barberwalkin.de";
-    await page.goto("/");
+    await page.goto("/sign-in");
 
     // 1. Code anfordern
     await page.getByPlaceholder("name@beispiel.de").fill(testEmail);
@@ -197,14 +200,14 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     await expect(
       page.getByText("Der Bestätigungscode ist abgelaufen. Bitte fordern Sie einen neuen an."),
     ).toBeVisible();
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    await expect(page.getByText("Angemeldet als")).not.toBeVisible();
   });
 
   test("rotiert den Bestätigungscode bei erneutem Anfordern (Resend Behavior)", async ({
     page,
   }) => {
     const testEmail = "resend@barberwalkin.de";
-    await page.goto("/");
+    await page.goto("/sign-in");
 
     // 1. Ersten Code anfordern
     await page.getByPlaceholder("name@beispiel.de").fill(testEmail);
@@ -217,7 +220,9 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     // 2. Code erneut anfordern (Resend)
     await page.getByRole("button", { name: "Code erneut senden" }).click();
     await expect(
-      page.getByText("Bestätigungscode wurde an Ihre E-Mail-Adresse gesendet."),
+      page.getByText(
+        "Anfrage verarbeitet. Falls die Zustellung möglich war, erhalten Sie gleich einen Bestätigungscode.",
+      ),
     ).toBeVisible();
 
     const deliveries = testServer.getDeliveredOtps(testEmail);
@@ -243,7 +248,7 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
     page,
   }) => {
     testServer.setSimulateEmailDeliveryError(true);
-    await page.goto("/");
+    await page.goto("/sign-in");
 
     await page.getByPlaceholder("name@beispiel.de").fill("failure@barberwalkin.de");
     await page.getByRole("button", { name: "Code anfordern" }).click();
@@ -256,17 +261,16 @@ test.describe("E-Mail OTP Browser End-to-End Akzeptanzpfade", () => {
 
     // OTP-Eingabefeld wird bei Zustellungsfehler nicht angezeigt
     await expect(page.getByPlaceholder("123456")).not.toBeVisible();
-    await expect(page.getByText("Nicht angemeldet")).toBeVisible();
+    await expect(page.getByText("Angemeldet als")).not.toBeVisible();
   });
 
   test("validiert leere und ungültige E-Mail-Eingaben (Empty & Validation States)", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/sign-in");
 
-    // 1. Leere E-Mail-Adresse
+    // 1. Leere E-Mail-Adresse: Feld-Fehler wird direkt angezeigt
     await page.getByRole("button", { name: "Code anfordern" }).click();
-    await expect(page.getByText("Authentifizierungsfehler")).toBeVisible();
     await expect(
       page.getByText("Bitte geben Sie eine E-Mail-Adresse ein."),
     ).toBeVisible();

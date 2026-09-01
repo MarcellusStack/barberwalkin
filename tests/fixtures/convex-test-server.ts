@@ -1,14 +1,6 @@
 import http from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 
-export interface ProbeRecord {
-  _id: string;
-  name: string;
-  status: string;
-  message?: string;
-  updatedAt: number;
-}
-
 export interface AuthUserRecord {
   id: string;
   name: string;
@@ -49,11 +41,6 @@ export interface ConvexTestServer {
   url: string;
   siteUrl: string;
   close: () => Promise<void>;
-  setProbe: (
-    record: Partial<ProbeRecord> & { name: string; status: string },
-  ) => ProbeRecord;
-  getProbe: (name: string) => ProbeRecord | null;
-  clearProbe: (name: string) => void;
   setAuthSession: (session: AuthSessionRecord, user: AuthUserRecord) => void;
   getAuthSession: (token: string) => { session: AuthSessionRecord; user: AuthUserRecord } | null;
   clearAuthSessions: () => void;
@@ -117,7 +104,6 @@ export async function createConvexTestServer(
   preferredPort = 3210,
   preferredSitePort = 3211,
 ): Promise<ConvexTestServer> {
-  const probeStore = new Map<string, ProbeRecord>();
   const sessions = new Map<string, { session: AuthSessionRecord; user: AuthUserRecord }>();
   const otpStore = new Map<string, StoredOtpRecord>();
   const deliveredEmails: DeliveredEmailRecord[] = [];
@@ -148,20 +134,8 @@ export async function createConvexTestServer(
 
   const getQueryValue = (
     udfPath: string,
-    args: Record<string, unknown> = {},
     token?: string,
   ) => {
-    if (udfPath === "probe:getServerStatus") {
-      return {
-        status: "ok",
-        serverTimeUtc: Date.now(),
-        message: "Convex-Backend ist betriebsbereit.",
-      };
-    }
-    if (udfPath === "probe:getProbeStatus") {
-      const name = (args.name as string) || "integration-probe";
-      return probeStore.get(name) || null;
-    }
     if (udfPath === "auth:getCurrentUser") {
       if (!token) return null;
       let found = sessions.get(token);
@@ -229,8 +203,7 @@ export async function createConvexTestServer(
         (sessions.size === 1 ? Array.from(sessions.keys())[0] : undefined);
       const modifications = [];
       for (const [queryId, sub] of client.subscriptions.entries()) {
-        const argObj = (sub.args?.[0] as Record<string, unknown>) || {};
-        const val = getQueryValue(sub.udfPath, argObj, token);
+        const val = getQueryValue(sub.udfPath, token);
         modifications.push({
           type: "QueryUpdated",
           queryId,
@@ -295,12 +268,11 @@ export async function createConvexTestServer(
         try {
           const parsed = JSON.parse(body);
           const path = parsed.path;
-          const args = parsed.args?.[0] || {};
           const token =
             extractBearerToken(req.headers.authorization) ||
             parsed.token ||
             undefined;
-          const value = getQueryValue(path, args, token);
+          const value = getQueryValue(path, token);
 
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -330,29 +302,9 @@ export async function createConvexTestServer(
       });
       req.on("end", () => {
         try {
-          const parsed = JSON.parse(body);
-          const path = parsed.path;
-          const args = parsed.args?.[0] || {};
+          JSON.parse(body);
 
-          let result: unknown = null;
-          if (path === "probe:setProbeStatus") {
-            const name = (args.name as string) || "integration-probe";
-            const record: ProbeRecord = {
-              _id: `probe_${Date.now()}`,
-              name,
-              status: args.status as string,
-              message: args.message as string | undefined,
-              updatedAt: Date.now(),
-            };
-            probeStore.set(name, record);
-            result = record;
-            notifyClients();
-          } else if (path === "probe:clearProbe") {
-            const name = (args.name as string) || "integration-probe";
-            probeStore.delete(name);
-            result = { success: true };
-            notifyClients();
-          }
+          const result: unknown = null;
 
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -814,7 +766,7 @@ export async function createConvexTestServer(
       return;
     }
 
-    // Default 200 for health/probes
+    // Default 200 for health checks
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
   });
@@ -879,8 +831,7 @@ export async function createConvexTestServer(
                 args: mod.args || [],
               });
 
-              const argObj = (mod.args?.[0] as Record<string, unknown>) || {};
-              const val = getQueryValue(mod.udfPath, argObj, token);
+              const val = getQueryValue(mod.udfPath, token);
               modifications.push({
                 type: "QueryUpdated",
                 queryId: mod.queryId,
@@ -918,26 +869,7 @@ export async function createConvexTestServer(
             }),
           );
         } else if (msg.type === "Mutation") {
-          let result: unknown = null;
-          const udfPath = msg.udfPath;
-          const args = (msg.args?.[0] as Record<string, unknown>) || {};
-
-          if (udfPath === "probe:setProbeStatus") {
-            const name = (args.name as string) || "integration-probe";
-            const record: ProbeRecord = {
-              _id: `probe_${Date.now()}`,
-              name,
-              status: args.status as string,
-              message: args.message as string | undefined,
-              updatedAt: Date.now(),
-            };
-            probeStore.set(name, record);
-            result = record;
-          } else if (udfPath === "probe:clearProbe") {
-            const name = (args.name as string) || "integration-probe";
-            probeStore.delete(name);
-            result = { success: true };
-          }
+          const result: unknown = null;
 
           currentTs += 1;
           ws.send(
@@ -976,8 +908,7 @@ export async function createConvexTestServer(
 
           const modifications = [];
           for (const [queryId, sub] of client.subscriptions.entries()) {
-            const argObj = (sub.args?.[0] as Record<string, unknown>) || {};
-            const val = getQueryValue(sub.udfPath, argObj, client.token);
+            const val = getQueryValue(sub.udfPath, client.token);
             modifications.push({
               type: "QueryUpdated",
               queryId,
@@ -1064,25 +995,6 @@ export async function createConvexTestServer(
         }),
       ]);
     },
-    setProbe: (record) => {
-      const full: ProbeRecord = {
-        _id: record._id || `probe_${Date.now()}`,
-        name: record.name,
-        status: record.status,
-        message: record.message,
-        updatedAt: record.updatedAt || Date.now(),
-      };
-      probeStore.set(record.name, full);
-      notifyClients();
-      return full;
-    },
-    getProbe: (name: string) => {
-      return probeStore.get(name) || null;
-    },
-    clearProbe: (name: string) => {
-      probeStore.delete(name);
-      notifyClients();
-    },
     setAuthSession: (session, user) => {
       sessions.set(session.token, { session, user });
       notifyClients();
@@ -1131,7 +1043,6 @@ export async function createConvexTestServer(
       deliveredEmails.length = 0;
     },
     reset: () => {
-      probeStore.clear();
       sessions.clear();
       otpStore.clear();
       deliveredEmails.length = 0;
