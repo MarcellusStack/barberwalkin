@@ -15,6 +15,7 @@ import { schemaResolver, useForm } from "@mantine/form";
 import { z } from "zod/v4";
 import { authClient } from "@/lib/auth-client";
 import { translateAuthError } from "@/lib/auth-error-message";
+import { MotionReveal } from "@/components/motion-reveal";
 
 const signInSchema = z
   .object({
@@ -216,14 +217,16 @@ export function SignInForm() {
             />
 
             {otpSent && (
-              <TextInput
-                {...form.getInputProps("otp")}
-                label="Bestätigungscode"
-                placeholder="123456"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                disabled={form.submitting}
-              />
+              <MotionReveal>
+                <TextInput
+                  {...form.getInputProps("otp")}
+                  label="Bestätigungscode"
+                  placeholder="123456"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  disabled={form.submitting}
+                />
+              </MotionReveal>
             )}
 
             <Button
